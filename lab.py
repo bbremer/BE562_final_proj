@@ -170,7 +170,25 @@ class Lab:
                 n2 = b2.node
                 b1.p_dict[b2] = n1.dykstra(n2, self.nodes)
 
-    def plot(self, ims, include_nodes=False):
+    def plot(self, ims, include_nodes=False, arr_row=None):
+        if arr_row is not None:
+            p_data = []
+            n = len(self.people)
+            p_data[:3*n], *b_data, day = arr_row
+
+            p_itr = iter(p_data)
+            for infected, p in zip(p_itr, self.people):
+                row = next(p_itr)
+                col = next(p_itr)
+                if row >= 0:
+                    p.pos = np.array([row, col])
+                else:
+                    p.pos = None
+                p.infected = infected
+
+            for infected, b in zip(b_data, self.benches):
+                b.infected = infected
+
         im = self.im.copy()
         try:
             for p in self.people:
@@ -183,6 +201,21 @@ class Lab:
                 n.draw(im)
 
         ims.append(im)
+
+    def data(self, day):
+        ret = ()
+
+        for p in self.p:
+            try:
+                row, col = self.pos
+            except TypeError:
+                row, col = -1, -1
+
+            ret += (p.infected, row, col)
+
+        ret += tuple(b.infected for b in self.benches)
+
+        return np.array(ret + (day,), dtype=np.int16)
 
 
 class Bench(Rectangle):
@@ -208,8 +241,11 @@ class Bench(Rectangle):
         self.node = random.choice(nodes)
         self.node.v = 7
 
-    def update(self):
-        pass
+    def update(self, L):
+        if self.timer:
+            self.timer -= 1
+        elif self.infected:
+            self.infected = 0
 
 
 def bench(y1, x1, y2, x2, i):
@@ -274,6 +310,8 @@ class Person(Rectangle):
         self.v = 4
         self.size = np.array((50, 50))
         self.path = []
+        self.infected = 0
+        self.covid_timer = 0
 
     def enter_lab(self, y, x):
         self.pos = np.array((y, x))
@@ -284,10 +322,46 @@ class Person(Rectangle):
         else:
             self.pos += np.array(dpos)
 
-    def update(self):
+    def update(self, L, pp, sp, ps, d, pr, br):
+        if self.covid_timer:
+            self.covid_timer -= 1
+            if not self.covid_timer:
+                self.infected = 0
+
         if self.path:
-            curr_node = self.path.pop(0)
-            self.pos = curr_node.pos
+            self.curr_node = self.path.pop(0)
+            self.pos = self.curr_node.pos
+            return
+        elif self.timer:
+            self.timer -= 1
+        elif not self.schedule:
+            self.in_lab = False
+            return
+        else:
+            b1, b2, t = self.schedule.pop(0)
+            self.path = b1.p_dict[b2]
+            self.timer = t
+            return
+
+        bench = self.curr_node.bench
+
+        # sp
+        if bench.infected and random.choice([0, 1], [1-sp, sp])[0]:
+            self.infected = 1
+            self.covid_timer = pr
+            return
+
+        # ps
+        if self.infected and random.choice([0, 1], [1-ps, ps])[0]:
+            bench.infected = 1
+            bench.timer = br
+
+        for p in L.people:
+            if p is not self and p.infected \
+               and np.linalg.norm(self.pos, p.pos) < d:
+                self.infected = 1
+                self.covid_timer = pr
+                return
 
     def draw(self, arr):
         pos = self.pos - self.size // 2
@@ -296,6 +370,31 @@ class Person(Rectangle):
         for i in range(y, y+h):
             for j in range(x, x+w):
                 arr[i, j] = v
+
+    def daily_init(self, L, b, pr):
+        self.in_lab = True
+        sched = random.sample(range(50400), 6)
+        sched.insert(0, 0)
+        sched.append(50400)
+        sched.sort()
+        diff = [t2 - t1 for t1, t2 in zip(sched, sched[1:])]
+        init_time = diff.pop(0)
+        timed_benches = random.choices(L.benches, k=7)
+        bench_paths = [(b1, b2) for b1, b2 in zip(timed_benches,
+                                                  timed_benches[1:])]
+        self.schedule = [b + (t,) for b, t in zip(bench_paths, diff)]
+        self.pos = timed_benches[0].node.pos
+        self.timer = init_time
+        self.curr_node = timed_benches[0].node
+
+        if self.covid_timer:
+            self.covid_timer = max(0, self.covid_timer - 2*16*3600*pr)
+            if not self.covid_timer:
+                self.infected = 0
+
+        if not self.infected and random.choices([0, 1], [1-b, b])[0]:
+            self.infected = 1
+            self.covid_timer = pr
 
 
 def load_lab(fn):
