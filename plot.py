@@ -12,18 +12,49 @@ lab_fn, data_fn = sys.argv[1:]
 
 arg_names = ['pp', 'sp', 'ps', 'd', 'b', 'n', 'br', 'pr', 'lab_fn']
 
-L = lab.load_lab(lab_fn)
 
 with h5py.File(data_fn, 'r') as f:
-    dataset = f['data']
+    g = f['g']
+    dataset = g['default']
+    data = dataset[:]
 
-data = np.array(dataset)
-attrs = {name: dataset.attrs[name] for name in arg_names}
+    print(g['events'][:])
+
+    movements = g['movements'][:]
+    for m in movements:
+        q = m.decode().split(',')
+        if q[0] == '7' and q[2] == '1':
+            print(m)
+
+    attrs = {name: g.attrs[name] for name in arg_names}
+
+L = lab.load_lab(attrs['lab_fn'])
 
 n = attrs['n']
 L.people = [lab.Person() for _ in range(n)]
 
+
+# y1, x1 = data[0, 1:3]
+
+g = iter(data)
+prev = None
+for i, d in enumerate(g):
+    # if d[1] != y1 or d[2] != x1:
+    if any(v == 1 for v in d[:3*n:3]):
+        print(i)
+        # thing = [prev, d]
+        thing = [d]
+        break
+    prev = d
+else:
+    print('exited')
+
+thing += [next(g) for _ in range(20)]
+data = np.array(thing)
+
+# print(data[:10000:1000])
 ims = []
+# for row in data[:10000:1000]:
 for row in data:
     L.plot(ims, arr_row=row)
 

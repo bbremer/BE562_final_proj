@@ -48,7 +48,7 @@ class Node(Rectangle):
         return abs(n.x - self.x) + abs(n.y - self.y)  # Manhattan Distance (L1)
 
     def __str__(self):
-        return str(self.pos)
+        return 'Node str(self.pos)'
 
     def draw(self, arr):
         pos = self.pos - self.size // 2
@@ -65,19 +65,19 @@ class Node(Rectangle):
             return True
         return False
 
-    def dykstra(self, dest, nodes):
+    def dykstra(self, dest, L):
         n1 = self
         n2 = dest
 
         n1.visited = True
         n1.weight = 0
 
-        candidates = nodes
+        candidates = L.nodes
         curr = n1
 
         while curr is not n2:
             for neighbor_i in random.sample(curr.edges, len(curr.edges)):
-                neighbor = nodes[neighbor_i]
+                neighbor = L.nodes[neighbor_i]
                 if neighbor.visited or not neighbor.good_candidate(n1, n2):
                     continue
                 d = curr.weight + 1
@@ -97,12 +97,12 @@ class Node(Rectangle):
             path.insert(0, curr)
 
         # reset nodes
-        for n in nodes:
+        for n in L.nodes:
             n.visited = False
             n.weight = 1000000000
             n.prev = None
 
-        return path
+        return tuple(L.nodes.index(n) for n in path)
 
 
 def point_in_rect(y1, x1, y2, x2, y, x):
@@ -164,18 +164,19 @@ class Lab:
         for b1 in self.benches:
             b1.p_dict = {}
             n1 = b1.node
-            for b2 in self.benches:
-                if b1 is b2:
-                    b1.p_dict[b2] = []
+            for b2 in range(len(self.benches)):
+                if b1 is self.benches[b2]:
+                    b1.p_dict[b2] = [self.nodes.index(b1.node)]
                     continue
-                n2 = b2.node
-                b1.p_dict[b2] = n1.dykstra(n2, self.nodes)
+                n2 = self.benches[b2].node
+                b1.p_dict[b2] = n1.dykstra(n2, self)
 
-    def plot(self, ims, include_nodes=False, arr_row=None):
+    def plot(self, ims, include_benches=False, include_nodes=False,
+             arr_row=None):
         if arr_row is not None:
-            p_data = []
             n = len(self.people)
-            p_data[:3*n], *b_data, day = arr_row
+            p_data = arr_row[:3*n]
+            b_data = arr_row[3*n:-1]
 
             p_itr = iter(p_data)
             for infected, p in zip(p_itr, self.people):
@@ -191,6 +192,8 @@ class Lab:
                 b.infected = infected
 
         im = self.im.copy()
+        for b in self.benches:
+            b.draw(im)
         try:
             for p in self.people:
                 if p.pos is not None:
@@ -232,6 +235,7 @@ class Bench(Rectangle):
             self.y1, self.x1 = pos2
             self.y2, self.x2 = pos1
         self.ind = ind
+        self.infected = 0
 
     def find_nodes(self, nodes):
         nodes = [n for n in nodes if point_in_rect(self.y1, self.x1, self.y2,
@@ -242,11 +246,24 @@ class Bench(Rectangle):
         self.node = random.choice(nodes)
         self.node.v = 7
 
-    def update(self, L):
+    def update(self, L, day, i):
         if self.timer:
             self.timer -= 1
         elif self.infected:
             self.infected = 0
+            L.events.append(f'{day},{i},uninfected,b,'
+                            '{L.benches.index(self)}')
+
+    def draw(self, arr):
+        (y, x), (h, w) = self.pos, self.size
+        # v = self.v
+        if self.infected:
+            v = 2
+        else:
+            v = 1
+        for i in range(y, y+h):
+            for j in range(x, x+w):
+                arr[i, j] = v
 
 
 def bench(y1, x1, y2, x2, i):
@@ -323,14 +340,18 @@ class Person(Rectangle):
         else:
             self.pos += np.array(dpos)
 
-    def update(self, L, pp, sp, ps, d, pr, br):
+    def update(self, L, pp, sp, ps, d, pr, br, day, i):
         if self.covid_timer:
             self.covid_timer -= 1
             if not self.covid_timer:
                 self.infected = 0
+                L.events.append(f'{day},{i},uninfected,p,'
+                                f'{L.people.index(self)}')
 
         if self.path:
-            self.curr_node = self.path.pop(0)
+            i = self.path[0]
+            self.path = self.path[1:]
+            self.curr_node = L.nodes[i]
             self.pos = self.curr_node.pos
             return
         elif self.timer:
@@ -340,58 +361,77 @@ class Person(Rectangle):
             return
         else:
             b1, b2, t = self.schedule.pop(0)
-            try:
-                self.path = b1.p_dict[b2]
-            except KeyError:
-                print(b1.p_dict)
-                print(b2)
-                1/0
+            L.movements.append(f'{day},{i},{L.people.index(self)},'
+                               f'{b1},{b2}')
+            self.path = L.benches[b1].p_dict[b2]
             self.timer = t
             return
 
         bench = L.benches[self.curr_node.bench]
-
-        # sp
-        if bench.infected and random.choice([0, 1], [1-sp, sp])[0]:
-            self.infected = 1
-            self.covid_timer = pr
-            return
+        # if self.infected:
+        #     print(L.people.index(self), self.curr_node, self.curr_node.bench)
 
         # ps
-        if self.infected and random.choice([0, 1], [1-ps, ps])[0]:
+        if self.infected and random.choices([0, 1], [1-ps, ps])[0]:
             bench.infected = 1
             bench.timer = br
+            L.events.append(f'{day},{i},ps,{L.people.index(self)},'
+                            f'{L.benches.index(bench)}')
+            # print(L.people.index(self), self.curr_node, self.curr_node.bench)
+
+        if self.infected:
+            return
+
+        # sp
+        if bench.infected and random.choices([0, 1], [1-sp, sp])[0]:
+            self.infected = 1
+            self.covid_timer = pr
+            L.events.append(f'{day},{i},sp,{L.benches.index(bench)},'
+                            f'{L.people.index(self)}')
+            return
 
         for p in L.people:
             if p is not self and p.infected \
-               and np.linalg.norm(self.pos, p.pos) < d:
+               and np.linalg.norm(self.pos - p.pos) < d:
                 self.infected = 1
                 self.covid_timer = pr
+                L.events.append(f'{day},{i},pp,{L.people.index(p)},'
+                                f'{L.people.index(self)}')
                 return
 
     def draw(self, arr):
         pos = self.pos - self.size // 2
         (y, x), (h, w) = pos, self.size
-        v = self.v
+        # v = self.v
+        if self.infected:
+            v = 5
+        else:
+            v = 4
         for i in range(y, y+h):
             for j in range(x, x+w):
                 arr[i, j] = v
 
-    def daily_init(self, L, b, pr):
+    def daily_init(self, L, b, pr, day):
         self.in_lab = True
-        sched = random.sample(range(50400), 6)
+        movements = 30
+        sched = random.sample(range(50400), movements)
         sched.insert(0, 0)
         sched.append(50400)
         sched.sort()
         diff = [t2 - t1 for t1, t2 in zip(sched, sched[1:])]
         init_time = diff.pop(0)
-        timed_benches = random.choices(L.benches, k=7)
+        timed_benches = random.choices(range(len(L.benches)), k=movements+1)
         bench_paths = [(b1, b2) for b1, b2 in zip(timed_benches,
                                                   timed_benches[1:])]
-        self.schedule = [b + (t,) for b, t in zip(bench_paths, diff)]
-        self.pos = timed_benches[0].node.pos
+        self.schedule = [bench + (t,) for bench, t in zip(bench_paths, diff)]
+        init_bench = L.benches[timed_benches[0]]
+        self.pos = init_bench.node.pos
         self.timer = init_time
-        self.curr_node = timed_benches[0].node
+        self.curr_node = init_bench.node
+        L.people.index(self)
+        # L.movements.append(f'{day},init,{L.people.index(self)}')
+        L.movements.append(f'{day},init,{L.people.index(self)},'
+                           f'{timed_benches[0]}')
 
         if self.covid_timer:
             self.covid_timer = max(0, self.covid_timer - 2*16*3600*pr)
@@ -401,6 +441,7 @@ class Person(Rectangle):
         if not self.infected and random.choices([0, 1], [1-b, b])[0]:
             self.infected = 1
             self.covid_timer = pr
+            L.events.append(f'{day},init,{L.people.index(self)}')
 
 
 def load_lab(fn):
@@ -415,6 +456,11 @@ if __name__ == '__main__':
 
     L = Lab(lab_h, lab_w, walls, benches)
     pickle.dump(L, open('Lab_v1.p', 'wb'))
+
+    for b1 in L.benches:
+        for b2 in range(len(L.benches)):
+            print(len(b1.p_dict[b2]))
+
     del L
 
     L2 = pickle.load(open('Lab_v1.p', 'rb'))
