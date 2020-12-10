@@ -391,13 +391,14 @@ class Person(Rectangle):
             return
 
         for p in L.people:
-            if p is not self and p.infected \
-               and np.linalg.norm(self.pos - p.pos) < d:
-                self.infected = 1
-                self.covid_timer = pr
-                L.events.append(f'{day},{i},pp,{L.people.index(p)},'
-                                f'{L.people.index(self)}')
-                return
+            if p.infected:
+                if np.linalg.norm(self.pos - p.pos) < d:
+                    if random.choices([0, 1], [1-pp, pp])[0]:
+                        self.infected = 1
+                        self.covid_timer = pr
+                        L.events.append(f'{day},{i},pp,{L.people.index(p)},'
+                                        f'{L.people.index(self)}')
+                        return
 
     def draw(self, arr):
         pos = self.pos - self.size // 2
