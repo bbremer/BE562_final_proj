@@ -166,6 +166,7 @@ class Lab:
             n1 = b1.node
             for b2 in self.benches:
                 if b1 is b2:
+                    b1.p_dict[b2] = []
                     continue
                 n2 = b2.node
                 b1.p_dict[b2] = n1.dykstra(n2, self.nodes)
@@ -205,9 +206,9 @@ class Lab:
     def data(self, day):
         ret = ()
 
-        for p in self.p:
+        for p in self.people:
             try:
-                row, col = self.pos
+                row, col = p.pos
             except TypeError:
                 row, col = -1, -1
 
@@ -339,11 +340,16 @@ class Person(Rectangle):
             return
         else:
             b1, b2, t = self.schedule.pop(0)
-            self.path = b1.p_dict[b2]
+            try:
+                self.path = b1.p_dict[b2]
+            except KeyError:
+                print(b1.p_dict)
+                print(b2)
+                1/0
             self.timer = t
             return
 
-        bench = self.curr_node.bench
+        bench = L.benches[self.curr_node.bench]
 
         # sp
         if bench.infected and random.choice([0, 1], [1-sp, sp])[0]:
